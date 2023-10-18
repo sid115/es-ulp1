@@ -56,15 +56,15 @@ L1        | Layer 1, Bitübertragungsschicht
 L2        | Sicherungsschicht
 L3        | Vermittlungsschicht
 L7        | Anwendungsschicht
-SOF       |
+SOF       | Start of Frame
 To        | Empfängeradresse
 From      | 0: Masterpaket; sonst: Antwortpaket
 Vers      | Versionsnummer, hier: 5
 Hops      | Zähler
 ApNr      | Applikationsnummer
-L7_SDU[i] |
-Checksum  |
-EOF       |
+L7_SDU[i] | Nutzdaten Layer 7
+Checksum  | Prüfsumme
+EOF       | End of Frame
 
 In den folgenden Aufgaben sollen Sie Felder anlegen.
 Zur besseren Lesbarkeit wurde die Größenangabe weggelassen.
@@ -77,19 +77,19 @@ Weiterhin sind im Text genutzte Variablen/Defines vorgegeben.
 uint8_t myAddress = 0x2a;
 /* DEFINES */
 #define MMCP_MASTER_ADDRESS 0
-#define MMCP_VERSION 4
+#define MMCP_VERSION 5
 #define L7_PDU_size 9
 #define L7_SDU_size 8
 #define L7_PCI_size 1
-#define L3_PDU_size ?
-#define L3_SDU_size ?
-#define L3_PCI_size ?
-#define L2_PDU_size ?
+#define L3_PDU_size 13
+#define L3_SDU_size 9
+#define L3_PCI_size 4
+#define L2_PDU_size 14
 #define L2_SDU_size 13
-#define L2_PCI_size ?
-#define L1_PDU_size ?
-#define L1_SDU_size ?
-#define L1_PCI_size ?
+#define L2_PCI_size 1
+#define L1_PDU_size 16
+#define L1_SDU_size 14
+#define L1_PCI_size 2
 ```
 
 ## L1_receive
@@ -180,15 +180,10 @@ ApNr 103: | L7_SDU[0] | L7_SDU[1] | L7_SDU[2] | L7_SDU[3] | L7_SDU[4] | L7_SDU[5
 UID Bit: | 71..64 | 79..72 | 87..80 | 95..88 | - | - | - | -
 
 Beispiel für die UID 0xbbaa99887766554433221100 (Bits 95..64 = 0xbb, also binär 10111011):
-
 HAL_GetUIDw0 gibt zurück: 0x33221100
-
 HAL_GetUIDw1 gibt zurück: 0x77665544
-
 HAL_GetUIDw2 gibt zurück: 0xbbaa9988
-
 Die SDU von ApNr 102 enthält u.a.: L7_SDU[0] = 0x00 , L7_SDU[7] = 0x77
-
 Die SDU von ApNr 103 enthält u.a.: L7_SDU[0] = 0x88 , L7_SDU[3] = 0xbb
 
 Diese Abbildung ist durch ein einfaches casten möglich (auf little-endian Systemen, wie es das genutzte Board ist).
