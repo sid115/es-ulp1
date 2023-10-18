@@ -105,7 +105,7 @@ Berechnen und Prüfen Sie den CRC.
 Nur wenn die Prüfung des CRC erfolgreich ist, geben Sie die 13 Byte große L2_SDU weiter an den nächsten Layer.
 Stimmt die CRC Summe nicht, ist keine weitere Aktion nötig.
 Über einen Timeout kann der Absender erfahren, dass das Paket verlorengegangen ist.
-Die CRC Berechung ohne Reflektion inititalisiert das 1-Byte Register mit 0 und nutzt 0x07 als Generatorpolynom.
+Die CRC Berechung ohne Reflektion inititalisiert das 1-Byte Register mit 0 und nutzt 0x9b als Generatorpolynom.
 Konkrete Hinweise zur CRC-Berechnung finden sich auf den hier verlinkten Seiten
 von [Michael Barr](https://barrgroup.com/embedded-systems/how-to/crc-calculation-c-code).
 Eine online Überprüfung Ihres CRC-Codes können Sie hier durchführen.
@@ -180,11 +180,11 @@ ApNr 103: | L7_SDU[0] | L7_SDU[1] | L7_SDU[2] | L7_SDU[3] | L7_SDU[4] | L7_SDU[5
 UID Bit: | 71..64 | 79..72 | 87..80 | 95..88 | - | - | - | -
 
 Beispiel für die UID 0xbbaa99887766554433221100 (Bits 95..64 = 0xbb, also binär 10111011):
-HAL_GetUIDw0 gibt zurück: 0x33221100
-HAL_GetUIDw1 gibt zurück: 0x77665544
-HAL_GetUIDw2 gibt zurück: 0xbbaa9988
-Die SDU von ApNr 102 enthält u.a.: L7_SDU[0] = 0x00 , L7_SDU[7] = 0x77
-Die SDU von ApNr 103 enthält u.a.: L7_SDU[0] = 0x88 , L7_SDU[3] = 0xbb
+- HAL_GetUIDw0 gibt zurück: 0x33221100
+- HAL_GetUIDw1 gibt zurück: 0x77665544
+- HAL_GetUIDw2 gibt zurück: 0xbbaa9988
+- Die SDU von ApNr 102 enthält u.a.: L7_SDU[0] = 0x00 , L7_SDU[7] = 0x77
+- Die SDU von ApNr 103 enthält u.a.: L7_SDU[0] = 0x88 , L7_SDU[3] = 0xbb
 
 Diese Abbildung ist durch ein einfaches casten möglich (auf little-endian Systemen, wie es das genutzte Board ist).
 Die erzeugte Layer 7 SDU wird zusammen mit der Applikationsnummer ApNr an L7_send übergeben.
