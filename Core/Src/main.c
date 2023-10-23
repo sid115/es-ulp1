@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MY_ADDRESS 3
+#define MY_ADDRESS 0x03
 #define MMCP_MASTER_ADDRESS 0
 #define MMCP_VERSION 5
 #define L7_PDU_size 9
@@ -50,10 +50,11 @@
 #define L1_PCI_size 2
 #define _SOF 0
 #define _EOF 0
+#define DEBOUNCE_INTERVAL 10 // button debounce time in milliseconds
 #define CRC_POLYNOMIAL 0x9b
 #define CRC_WIDTH  (8 * sizeof(uint8_t))
 #define CRC_TOPBIT (1 << (CRC_WIDTH - 1))
-/* USER CODE END PD *
+/* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
@@ -86,8 +87,11 @@ uint8_t calculate_checksum(const uint8_t *data, size_t length);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint8_t L1_PDU[L1_PDU_size] = { 0 };
 uint8_t cnt = 0; /* hops */
+uint8_t rxBuffer[L1_PDU_size] = { 0 }; /* receive buffer */
 bool dataReceived = false;
+bool dataTransmitted = false;
 /* USER CODE END 0 */
 
 /**
@@ -127,13 +131,19 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {  
-    if (dataReceived) {
-
-      dataReceived = false;
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	HAL_UART_Receive_IT(&huart2, rxBuffer, L1_PDU_size);
+
+    if (dataReceived) {
+      L1_receive(L1_PDU);
+
+      dataReceived = false;
+    }
+
+    while (!dataTransmitted) {};
+    dataTransmitted = false;
   }
   /* USER CODE END 3 */
 }
@@ -255,6 +265,26 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+  memcpy(L1_PDU, rxBuffer, L1_PDU_size);
+  dataReceived = true;
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
+  dataTransmitted = true;
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+  static unsigned long millis = 0; // elapsed milliseconds for button debouncing
+  static unsigned long lastPress = 0; // time of last rising edge (button press)
+  millis = HAL_GetTick();
+
+  if (GPIO_Pin == B1_Pin && (millis - lastPress) > DEBOUNCE_INTERVAL) {
+    cnt++;
+    lastPress = millis;
+  }
+}
+
 uint8_t crc(const uint8_t message[], size_t nBytes) {
   uint8_t remainder = 0;	
 
@@ -283,14 +313,14 @@ uint8_t calculate_checksum(const uint8_t *data, size_t length) {
 }
 
 void L1_send(uint8_t L1_SDU[]) {
-  uint8_t L1_PDU[L1_PDU_size] = { 0 };;
+  uint8_t L1_PDU[L1_PDU_size] = { 0 };
   uint8_t L1_PCI[L1_PCI_size] = {_SOF, _EOF};
 
   L1_PDU[0] = L1_PCI[0]; /* SOF */
   memcpy(&L1_PDU[1], L1_SDU, L1_SDU_size);
   L1_PDU[L1_PDU_size - 1] = L1_PCI[1]; /* EOF */
 
-  HAL_UART_Transmit(&huart2, L1_PDU, L1_PDU_size, HAL_MAX_DELAY);
+  HAL_UART_Transmit_IT(&huart2, L1_PDU, L1_PDU_size);
 }
 
 void L1_receive(uint8_t L1_PDU[]) {
@@ -306,20 +336,22 @@ void L2_send(uint8_t L2_SDU[]) {
   uint8_t L2_PCI[L2_PCI_size] = { 0 }; /* checksum */
   
   L2_PCI[0] = calculate_checksum(L2_SDU, L2_SDU_size);
-  memcpy(&L2_PDU[0], L2_PCI, L2_PCI_size);
+  memcpy(L2_PDU, L2_PCI, L2_PCI_size);
   memcpy(&L2_PDU[L2_PCI_size], L2_SDU, L2_SDU_size);
 
   L1_send(L2_PDU);
 }
 
 void L2_receive(uint8_t L2_PDU[]) {
-  if (crc(L2_PDU, L2_PDU_size) == 4711 /* checksum */) {
+  uint8_t checksum = L2_PDU[L2_PDU_size - L2_PCI_size];
+
+  if (crc(L2_PDU, L2_PDU_size) == checksum) {
     uint8_t L2_SDU[L2_SDU_size] = { 0 };
 
     memcpy(L2_SDU, &L2_PDU[L2_PCI_size], L2_SDU_size);
 
     L3_receive(L2_SDU);
-  } else {
+  } else { /* discard */
     Error_Handler();
   }
 }
@@ -333,7 +365,7 @@ void L3_send(uint8_t L3_SDU[]) {
   L3_PCI[2] = MMCP_VERSION; /* version */
   L3_PCI[3] = cnt; /* hops */
 
-  memcpy(&L3_PDU[0], L3_PCI, L3_PCI_size);
+  memcpy(L3_PDU, L3_PCI, L3_PCI_size);
   memcpy(&L3_PDU[L3_PCI_size], L3_SDU, L3_SDU_size);
 
   L2_send(L3_PDU);
@@ -343,7 +375,7 @@ void L3_receive(uint8_t L3_PDU[]) {
   uint8_t L3_PCI[L3_PCI_size] = { 0 };
   uint8_t L3_SDU[L3_SDU_size] = { 0 };
 
-  memcpy(&L3_PCI[0], L3_PDU, L3_PCI_size);
+  memcpy(L3_PCI, L3_PDU, L3_PCI_size);
   memcpy(L3_SDU, &L3_PDU[L3_PCI_size], L2_SDU_size);
 
   uint8_t to = L3_PCI[0];
@@ -353,11 +385,12 @@ void L3_receive(uint8_t L3_PDU[]) {
 
   if (!to && !from) Error_Handler();
 
-  if (!to) { cnt++; /* weiterleiten */ };
-
-  if (to == MY_ADDRESS && from == MMCP_MASTER_ADDRESS && version == MMCP_VERSION) {
+  if (to == MY_ADDRESS && from == MMCP_MASTER_ADDRESS && version == MMCP_VERSION) { /* pass to next layer */
     L7_receive(L3_SDU); 
-  } else {
+  } else if (!to) { /* forward */
+    cnt++; 
+    L2_send(L3_PDU);
+  } else { /* discard */
     Error_Handler();
   }
 }
@@ -368,7 +401,7 @@ void L7_send(uint8_t ID, uint8_t L7_SDU[]) {
 
   L7_PCI[0] = ID;
 
-  memcpy(&L7_PDU[0], L7_PCI, L7_PCI_size);
+  memcpy(L7_PDU, L7_PCI, L7_PCI_size);
   memcpy(&L7_PDU[L7_PCI_size], L7_SDU, L7_SDU_size);
 
   L3_send(L7_PDU);
@@ -377,49 +410,43 @@ void L7_send(uint8_t ID, uint8_t L7_SDU[]) {
 void L7_receive(uint8_t L7_PDU[]) {
   uint8_t L7_SDU[L7_SDU_size];
   uint8_t ApNr = L7_PDU[0];
-  uint8_t ID = L7_PDU[1];
 
   memcpy(L7_SDU, &L7_SDU[2], L7_SDU_size);
 
   switch (ApNr) {
-    case 100: /* LED on/off */
-      if (L7_SDU[7] != 0) {
-        /* set LED on */
-      } else {
-        /* set LED off */
+    case 100: /* set LED */
+      if (L7_SDU[7] != 0) { /* set LED on */
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+      } else { /* set LED off */
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
       }
-
-      L7_send(ID, L7_SDU);
       break;
 
     case 101: /* read number of keystrokes */
-      uint8_t buttonPressCount = 0;
-      /* implement count routine */
-      L7_SDU[7] = buttonPressCount;
-
-      L7_send(ID, L7_SDU);
+      L7_SDU[7] = cnt;
+      cnt = 0;
       break;
 
-    case 102:
-    case 103: /* read out and return UID */
+    case 102: /* read out and return UID */
       uint32_t uid_part1 = HAL_GetUIDw0();
       uint32_t uid_part2 = HAL_GetUIDw1();
+
+      memcpy(L7_SDU, &uid_part1, sizeof(uid_part1));
+      memcpy(&L7_SDU[4], &uid_part2, sizeof(uid_part2));
+      break;
+
+    case 103: /* read out and return UID */
       uint32_t uid_part3 = HAL_GetUIDw2();
 
-      if (ApNr == 102) {
-        memcpy(L7_SDU, &uid_part1, sizeof(uid_part1));
-        memcpy(&L7_SDU[4], &uid_part2, sizeof(uid_part2));
-      } else {  /* ApNr == 103 */
-        memcpy(L7_SDU, &uid_part3, sizeof(uid_part3));
-      }
-
-      L7_send(ID, L7_SDU);
+      memcpy(L7_SDU, &uid_part3, sizeof(uid_part3));
       break;
 
     default:
-      /* Error_Handler();? */
+      Error_Handler();
       break;
   }
+
+  L7_send(ApNr, L7_SDU);
 }
 
 /* USER CODE END 4 */
@@ -433,6 +460,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+  dataTransmitted = true;
   while (1)
   {
   }
