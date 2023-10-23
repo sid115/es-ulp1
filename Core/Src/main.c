@@ -23,7 +23,6 @@
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
 #include <string.h>
-#include "stm32f4xx_hal.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,8 +33,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define MY_ADDRESS 0x03
+
 #define MMCP_MASTER_ADDRESS 0
 #define MMCP_VERSION 5
+
 #define L7_PDU_size 9
 #define L7_SDU_size 8
 #define L7_PCI_size 1
@@ -48,9 +49,12 @@
 #define L1_PDU_size 16
 #define L1_SDU_size 14
 #define L1_PCI_size 2
+
 #define _SOF 0
 #define _EOF 0
+
 #define DEBOUNCE_INTERVAL 10 // button debounce time in milliseconds
+
 #define CRC_POLYNOMIAL 0x9b
 #define CRC_WIDTH  (8 * sizeof(uint8_t))
 #define CRC_TOPBIT (1 << (CRC_WIDTH - 1))
@@ -62,17 +66,27 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+uint8_t L1_PDU[L1_PDU_size] = { 0 };
+uint8_t cnt = 0; /* hops */
+uint8_t rxBuffer[L1_PDU_size] = { 0 }; /* receive buffer */
+bool dataReceived = false;
+bool dataTransmitted = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
+void AL_UART_RxCpltCallback (UART_HandleTypeDef *huart);
+void HAL_UART_TxCpltCallback (UART_HandleTypeDef *huart);
+void HAL_GPIO_EXTI_Callback (uint16_t GPIO_Pin);
+
 void L1_receive(uint8_t L1_PDU[]);
 void L2_receive(uint8_t L2_PDU[]);
 void L3_receive(uint8_t L3_PDU[]);
@@ -81,17 +95,13 @@ void L1_send(uint8_t L1_SDU[]);
 void L2_send(uint8_t L2_SDU[]);
 void L3_send(uint8_t L3_SDU[]);
 void L7_send(uint8_t ID, uint8_t L7_SDU[]);
+
 uint8_t crc(const uint8_t message[], size_t nBytes);
-uint8_t calculate_checksum(const uint8_t *data, size_t length);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t L1_PDU[L1_PDU_size] = { 0 };
-uint8_t cnt = 0; /* hops */
-uint8_t rxBuffer[L1_PDU_size] = { 0 }; /* receive buffer */
-bool dataReceived = false;
-bool dataTransmitted = false;
+
 /* USER CODE END 0 */
 
 /**
@@ -123,6 +133,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -140,10 +151,10 @@ int main(void)
       L1_receive(L1_PDU);
 
       dataReceived = false;
-    }
 
-    while (!dataTransmitted) {};
-    dataTransmitted = false;
+      while (!dataTransmitted) {};
+      dataTransmitted = false;
+    }
   }
   /* USER CODE END 3 */
 }
@@ -192,6 +203,39 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
 }
 
 /**
@@ -302,16 +346,6 @@ uint8_t crc(const uint8_t message[], size_t nBytes) {
   return remainder;
 }
 
-uint8_t calculate_checksum(const uint8_t *data, size_t length) {
-  uint8_t checksum = 0;
-
-  for (size_t i = 0; i < length; i++) {
-    checksum ^= data[i]; /* XOR */
-  }
-
-  return checksum;
-}
-
 void L1_send(uint8_t L1_SDU[]) {
   uint8_t L1_PDU[L1_PDU_size] = { 0 };
   uint8_t L1_PCI[L1_PCI_size] = {_SOF, _EOF};
@@ -333,11 +367,9 @@ void L1_receive(uint8_t L1_PDU[]) {
 
 void L2_send(uint8_t L2_SDU[]) {
   uint8_t L2_PDU[L2_PDU_size] = { 0 };
-  uint8_t L2_PCI[L2_PCI_size] = { 0 }; /* checksum */
   
-  L2_PCI[0] = calculate_checksum(L2_SDU, L2_SDU_size);
-  memcpy(L2_PDU, L2_PCI, L2_PCI_size);
-  memcpy(&L2_PDU[L2_PCI_size], L2_SDU, L2_SDU_size);
+  memcpy(L2_PDU, L2_SDU, L2_SDU_size);
+  L2_PDU[L2_SDU_size] = crc(L2_SDU, L2_SDU_size); /* checksum */
 
   L1_send(L2_PDU);
 }
@@ -383,13 +415,15 @@ void L3_receive(uint8_t L3_PDU[]) {
   uint8_t version = L3_PCI[2];
   //uint8_t hops = L3_PCI[3];
 
-  if (!to && !from) Error_Handler();
+  if (to == 0 && from == 0) Error_Handler(); /* discard */
+  
+  if (to == 0) { /* forward */
+    cnt++; 
+    L2_send(L3_PDU);
+  } 
 
   if (to == MY_ADDRESS && from == MMCP_MASTER_ADDRESS && version == MMCP_VERSION) { /* pass to next layer */
     L7_receive(L3_SDU); 
-  } else if (!to) { /* forward */
-    cnt++; 
-    L2_send(L3_PDU);
   } else { /* discard */
     Error_Handler();
   }
@@ -408,10 +442,10 @@ void L7_send(uint8_t ID, uint8_t L7_SDU[]) {
 }
 
 void L7_receive(uint8_t L7_PDU[]) {
-  uint8_t L7_SDU[L7_SDU_size];
+  uint8_t L7_SDU[L7_SDU_size] = { 0 };
   uint8_t ApNr = L7_PDU[0];
 
-  memcpy(L7_SDU, &L7_SDU[2], L7_SDU_size);
+  memcpy(L7_SDU, &L7_PDU[1], L7_SDU_size);
 
   switch (ApNr) {
     case 100: /* set LED */
@@ -459,8 +493,8 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
   dataTransmitted = true;
+  __disable_irq();
   while (1)
   {
   }
