@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
 #include <string.h>
+#include "stm32f4xx_hal.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,8 +72,10 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 uint8_t L1_PDU[L1_PDU_size] = { 0 };
-uint8_t cnt = 0; /* hops */
 uint8_t rxBuffer[L1_PDU_size] = { 0 }; /* receive buffer */
+
+uint8_t cnt = 0; /* counts button presses */
+
 bool dataReceived = false;
 bool dataTransmitted = false;
 /* USER CODE END PV */
@@ -135,6 +138,12 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  /* begin testing */
+  //uint8_t test[L1_PDU_size] =  {0, 3, 0, 5, 0, 100, 43, 9, 3, 2, 1, 0, 99, 100, 183, 0};
+  //memcpy(L1_PDU, test, L1_PDU_size);
+  //dataReceived = true;
+  /* end testing */
 
   /* USER CODE END 2 */
 
@@ -319,9 +328,8 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-  static unsigned long millis = 0; // elapsed milliseconds for button debouncing
-  static unsigned long lastPress = 0; // time of last rising edge (button press)
-  millis = HAL_GetTick();
+  unsigned long millis = HAL_GetTick(); // elapsed milliseconds for button debouncing
+  unsigned long lastPress = 0; // time of last rising edge (button press)
 
   if (GPIO_Pin == B1_Pin && (millis - lastPress) > DEBOUNCE_INTERVAL) {
     cnt++;
@@ -343,11 +351,11 @@ uint8_t crc(const uint8_t message[], size_t nBytes) {
     }
   }
 
-  return remainder;
+  return (remainder);
 }
 
 void L1_send(uint8_t L1_SDU[]) {
-  uint8_t L1_PDU[L1_PDU_size] = { 0 };
+  //uint8_t L1_PDU[L1_PDU_size] = { 0 };
   uint8_t L1_PCI[L1_PCI_size] = {_SOF, _EOF};
 
   L1_PDU[0] = L1_PCI[0]; /* SOF */
@@ -375,13 +383,12 @@ void L2_send(uint8_t L2_SDU[]) {
 }
 
 void L2_receive(uint8_t L2_PDU[]) {
-  uint8_t checksum = L2_PDU[L2_PDU_size - L2_PCI_size];
+  uint8_t checksum = L2_PDU[L2_SDU_size];
+  uint8_t L2_SDU[L2_SDU_size] = { 0 };
 
-  if (crc(L2_PDU, L2_PDU_size) == checksum) {
-    uint8_t L2_SDU[L2_SDU_size] = { 0 };
+  memcpy(L2_SDU, L2_PDU, L2_SDU_size);
 
-    memcpy(L2_SDU, &L2_PDU[L2_PCI_size], L2_SDU_size);
-
+  if (checksum == crc(L2_SDU, L2_SDU_size)) {
     L3_receive(L2_SDU);
   } else { /* discard */
     Error_Handler();
@@ -395,7 +402,7 @@ void L3_send(uint8_t L3_SDU[]) {
   L3_PCI[0] = MMCP_MASTER_ADDRESS; /* to */
   L3_PCI[1] = MY_ADDRESS; /* from */
   L3_PCI[2] = MMCP_VERSION; /* version */
-  L3_PCI[3] = cnt; /* hops */
+  L3_PCI[3] = 0; /* hops */
 
   memcpy(L3_PDU, L3_PCI, L3_PCI_size);
   memcpy(&L3_PDU[L3_PCI_size], L3_SDU, L3_SDU_size);
@@ -408,17 +415,17 @@ void L3_receive(uint8_t L3_PDU[]) {
   uint8_t L3_SDU[L3_SDU_size] = { 0 };
 
   memcpy(L3_PCI, L3_PDU, L3_PCI_size);
-  memcpy(L3_SDU, &L3_PDU[L3_PCI_size], L2_SDU_size);
+  memcpy(L3_SDU, &L3_PDU[L3_PCI_size], L3_SDU_size);
 
   uint8_t to = L3_PCI[0];
   uint8_t from = L3_PCI[1];
   uint8_t version = L3_PCI[2];
-  //uint8_t hops = L3_PCI[3];
 
   if (to == 0 && from == 0) Error_Handler(); /* discard */
   
   if (to == 0) { /* forward */
-    cnt++; 
+    //cnt++; 
+    L3_PDU[3]++;
     L2_send(L3_PDU);
   } 
 
@@ -512,8 +519,7 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
