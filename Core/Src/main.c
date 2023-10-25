@@ -27,7 +27,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef uint8_t crc;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -53,14 +53,14 @@ typedef uint8_t crc;
 #define L1_SDU_size 14
 #define L1_PCI_size 2
 
-#define SOF 0
-#define EOF 0
+#define SOF 0 /* start of frame */
+#define EOF 0 /* end of frame */
 
 #define DEBOUNCE_INTERVAL 10 /* button debounce time in milliseconds */
 
-#define CRC_POLYNOMIAL 0x9b
-#define CRC_WIDTH  (8 * sizeof(crc))
-#define CRC_TOPBIT (1 << (CRC_WIDTH - 1))
+#define CRC_POLYNOMIAL 0x9b /* see crc() */
+#define CRC_WIDTH  (8 * sizeof(uint8_t)) /* see crc() */
+#define CRC_TOPBIT (1 << (CRC_WIDTH - 1)) /* see crc() */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -73,12 +73,10 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-/* GLOBALS */
-bool dataReceived = false;
-bool dataTransmitted = false;
+bool dataReceived = false; /* true when serial receive is complete */
+bool dataTransmitted = false; /* true when serial transmit is complete */
 
-uint8_t rxBuffer[L1_PDU_size] = { 0 };
-uint8_t L1_PDU[L1_PDU_size] = { 0 };
+uint8_t rxBuffer[L1_PDU_size] = { 0 }; /* receive buffer */
 
 uint8_t cnt = 0; /* button press counter */
 /* USER CODE END PV */
@@ -91,7 +89,7 @@ static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart);
-void HAL_GPIO_EXTI_Callback ( uint16_t GPIO_Pin );
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 
 void L1_send(uint8_t L1_SDU[]);
 void L1_receive(uint8_t L1_PDU[]);
@@ -102,7 +100,7 @@ void L3_receive(uint8_t L3_PDU[]);
 void L7_send(uint8_t ApNr, uint8_t L7_SDU[]);
 void L7_receive(uint8_t L7_PDU[]);
 
-crc crcSlow(uint8_t const message[], int nBytes);
+uint8_t crc(uint8_t const message[], int nBytes);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -152,15 +150,12 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     HAL_UART_Receive_IT(&huart2, rxBuffer, L1_PDU_size);
+  
+    while (!dataReceived) {} /* wait for HAL_UART_RxCpltCallback */
+    dataReceived = false;
 
-    if (dataReceived) {
-      L1_receive(L1_PDU);
-
-      dataReceived = false;
-
-      while (!dataTransmitted) {} /* wait for response */
-      dataTransmitted = false;
-	}
+    while (!dataTransmitted) {} /* wait for HAL_UART_TxCpltCallback or error */
+    dataTransmitted = false;
   }
   /* USER CODE END 3 */
 }
@@ -321,7 +316,7 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-  memcpy(L1_PDU, rxBuffer, L1_PDU_size);
+  L1_receive(rxBuffer);
 
   dataReceived = true;
 }
@@ -333,11 +328,9 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  static unsigned long millis = 0; /* elapsed time in milliseconds */
+  unsigned long millis = HAL_GetTick(); /* elapsed time in milliseconds */
   static unsigned long lastPress = 0; /* time since last button press */
 
-  millis = HAL_GetTick();
-  
   if (GPIO_Pin == B1_Pin && (millis - lastPress) > DEBOUNCE_INTERVAL) {
     cnt++;
     lastPress = millis;
@@ -346,6 +339,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void L1_send(uint8_t L1_SDU[])
 {
+  uint8_t L1_PDU[L1_PDU_size] = { 0 };
+
   L1_PDU[0] = SOF;
   memcpy(&L1_PDU[1], L1_SDU, L1_SDU_size);
   L1_PDU[L1_PDU_size - 1] = EOF;
@@ -367,7 +362,7 @@ void L2_send(uint8_t L2_SDU[])
   uint8_t L2_PDU[L2_PDU_size] = { 0 };
   
   memcpy(L2_PDU, L2_SDU, L2_SDU_size);
-  L2_PDU[L2_SDU_size] = crcSlow(L2_SDU, L2_SDU_size); /* checksum */
+  L2_PDU[L2_SDU_size] = crc(L2_SDU, L2_SDU_size); /* checksum */
   
   L1_send(L2_PDU);
 }
@@ -379,7 +374,7 @@ void L2_receive(uint8_t L2_PDU[])
   
   memcpy(L2_SDU, L2_PDU, L2_SDU_size);
   
-  if (checksum == crcSlow(L2_SDU, L2_SDU_size)) {
+  if (checksum == crc(L2_SDU, L2_SDU_size)) {
     L3_receive(L2_SDU);
   } else {
     dataTransmitted = true; /* error */
@@ -415,7 +410,7 @@ void L3_receive(uint8_t L3_PDU[])
     if (L3_PDU[0] == MY_ADDRESS) {
       L7_receive(L3_SDU);
     } else {
-      L3_PDU[3]++; /* cnt++ */
+      L3_PDU[3]++; /* increment counter */
       L2_send(L3_PDU);
     }
   } else {
@@ -476,8 +471,8 @@ void L7_receive(uint8_t L7_PDU[])
   L7_send(ApNr, L7_SDU);
 }
 
-crc crcSlow(uint8_t const message[], int nBytes) {
-  crc remainder = 0;
+uint8_t crc(uint8_t const message[], int nBytes) {
+  uint8_t remainder = 0;
 
   for (int byte = 0; byte < nBytes; ++byte) {
     remainder ^= (message[byte] << (CRC_WIDTH - 8));
